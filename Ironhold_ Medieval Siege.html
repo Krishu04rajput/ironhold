@@ -1,0 +1,175 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ironhold: Medieval Siege</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e2dac6;--panel:#d1c4a8;--ink:#2a2118;--line:#8b7a58;--btn:#3b4a33;--btnink:#f3ecd9;--sel:#8a2f22;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16140e;--panel:#25211a;--ink:#eadfc6;--line:#5d513a;--btn:#4a5c3e;--btnink:#f3ecd9;--sel:#b8432f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#16140e;--panel:#25211a;--ink:#eadfc6;--line:#5d513a;--btn:#4a5c3e;--btnink:#f3ecd9;--sel:#b8432f;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 Georgia,serif;display:flex;flex-direction:column;align-items:center}
+header{width:100%;max-width:660px;display:flex;justify-content:space-between;align-items:center;padding:10px 12px;gap:8px;flex-wrap:wrap}
+h1{font:800 22px Cinzel,Georgia,serif;margin:0}
+.st{display:flex;gap:12px;font-weight:bold;flex-wrap:wrap}
+canvas{width:100%;max-width:660px;aspect-ratio:1;border:2px solid var(--line);touch-action:manipulation;display:block}
+#bar{width:100%;max-width:660px;padding:8px 10px;display:flex;flex-wrap:wrap;gap:6px;background:var(--panel);border:2px solid var(--line);border-top:0;box-sizing:border-box}
+button{font:600 13px Cinzel,Georgia,serif;background:var(--btn);color:var(--btnink);border:2px solid transparent;border-radius:4px;padding:7px 9px;cursor:pointer}
+button.on{border-color:var(--sel);box-shadow:0 0 0 2px var(--sel)}
+button:disabled{opacity:.45}button:focus-visible{outline:3px solid var(--sel)}
+button.go{background:var(--sel)}
+#msg{max-width:640px;padding:8px 12px;min-height:44px;margin:0}
+#story{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;z-index:5}#story[hidden]{display:none}
+.card{max-width:440px;background:var(--panel);border:4px double var(--line);padding:20px;border-radius:4px}.card h2{font:800 20px Cinzel,Georgia,serif;margin:0 0 10px}.card p{margin:0 0 14px;line-height:1.6}
+</style></head><body>
+<header><h1>Ironhold: Ember</h1><div class="st" id="st"></div></header>
+<canvas id="c" aria-label="Game field"></canvas>
+<div id="bar"></div><p id="msg">Build your keep, train troops, then raid enemy villages.</p>
+<div id="story" hidden><div class="card"><h2 id="sh"></h2><p id="sp"></p><button id="sb">Continue</button><span id="so"></span></div></div>
+<script>
+const N=22,T=28,cv=document.getElementById('c'),g=cv.getContext('2d');cv.width=cv.height=N*T;
+const B={hall:{n:'Keep',w:3,h:3,hp:900,c:0,col:'#8d8d97',i:'🏰'},mine:{n:'Gold Mine',w:2,h:2,hp:300,c:100,col:'#b8921f',i:'⛏️'},farm:{n:'Farm',w:2,h:2,hp:250,c:80,col:'#7aa83c',i:'🌾'},barracks:{n:'Barracks',w:3,h:2,hp:400,c:200,col:'#8a3b2e',i:'⚔️'},tower:{n:'Archer Tower',w:2,h:2,hp:450,c:250,col:'#5b6574',i:'🏹'},wall:{n:'Wall',w:1,h:1,hp:200,c:20,col:'#76705f',i:''},fire:{n:'Bonfire',w:1,h:1,hp:150,c:60,col:'#444',i:''}};
+const U={knight:{n:'Knight',c:40,sz:2,hp:120,d:14,sp:2.2,r:.8,col:'#e6e6f2'},archer:{n:'Archer',c:30,sz:1,hp:50,d:8,sp:2.6,r:4.5,col:'#3f9a4a'},ram:{n:'Ram',c:80,sz:4,hp:260,d:40,sp:1.4,r:.8,col:'#8a5a2b'}};
+const D=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+const mk=(t,x,y,s=1)=>({t,x,y,w:B[t].w,h:B[t].h,hp:B[t].hp*s,m:B[t].hp*s});
+let S;try{S=JSON.parse(localStorage.getItem('ironhold'))}catch(e){}
+S=S||{gold:500,food:300,level:1,army:{knight:0,archer:0,ram:0},bs:[mk('hall',9,9),mk('mine',4,4),mk('farm',14,4),mk('barracks',4,14),mk('fire',8,14)]};
+let mode='home',sel='mine',foes=[],troops=[],fx=[],grid=[],timer=0,dep='knight',hover=null,hallDown=false,lvlFoe=1,ended=false;
+const save=()=>{try{localStorage.setItem('ironhold',JSON.stringify(S))}catch(e){}};
+const say=t=>document.getElementById('msg').textContent=t;
+const PRO='The Ashen Horde has burned Eastwatch and the border villages. You are the Lord Warden of Ironhold, last keep on the Marches. Build, train, and break the warlords who march under the black banner.';
+const STORY=[{lord:'Brask the Pale',t:'The Burned Mill',intro:'Brask and his raiders camp at the old mill with the stolen grain. Burn them out.',win:'Brask flees north and leaves his banner in the mud.'},{lord:'Lady Venna of Thorns',t:'The Ridge Fort',intro:'Venna holds a ridge village with archer towers. Bring rams to break them.',win:"Venna's seal is yours. Her letters name a greater master called Mordane."},{lord:'Sir Aldric the Turncoat',t:'The Sealed Hamlet',intro:'Your former knight has sealed a hamlet behind unbroken walls. Rams will have to breach them.',win:'Aldric yields and confesses that the Ashen King waits in the north.'},{lord:'Warlord Mordane',t:'The Iron Fortress',intro:'Mordane\'s fortress bristles with towers. Few have returned from it.',win:'Mordane\'s banner falls and the Marches breathe again.'},{lord:'The Ashen King',t:'The Last Stand',intro:'The Ashen King makes his final stand. End the war.',win:'The Ashen King kneels. Ironhold is saved, but the realm still needs a strong lord.'}];
+const CH=l=>STORY2[Math.min(l,STORY2.length)-1];
+let scb=null;function story0(h,p,cb){document.getElementById('sh').textContent=h;document.getElementById('sp').textContent=p;scb=cb;document.getElementById('story').hidden=false}
+document.getElementById('sb').onclick=()=>{document.getElementById('story').hidden=true;if(scb){const f=scb;scb=null;f()}};
+function mkgrid(l){grid=new Array(N*N).fill(null);for(const b of l)if(!b.dead)for(let y=b.y;y<b.y+b.h;y++)for(let x=b.x;x<b.x+b.w;x++)grid[y*N+x]=b}
+const free=(l,x,y,w,h,m=0)=>x>=0&&y>=0&&x+w<=N&&y+h<=N&&!l.some(b=>!b.dead&&x<b.x+b.w+m&&x+w+m>b.x&&y<b.y+b.h+m&&y+h+m>b.y);
+/* A* with binary heap. Walls cost 8, other buildings 30, so troops breach walls only when a detour is costlier. */
+class H{constructor(){this.a=[]}get n(){return this.a.length}
+push(v,p){const a=this.a;a.push([p,v]);let i=a.length-1;while(i){const q=(i-1)>>1;if(a[q][0]<=a[i][0])break;[a[q],a[i]]=[a[i],a[q]];i=q}}
+pop(){const a=this.a,t=a[0],l=a.pop();if(a.length){a[0]=l;let i=0;for(;;){let m=i,L=2*i+1,R=L+1;if(L<a.length&&a[L][0]<a[m][0])m=L;if(R<a.length&&a[R][0]<a[m][0])m=R;if(m==i)break;[a[m],a[i]]=[a[i],a[m]];i=m}}return t[1]}}
+function astar(sx,sy,goal){const s=sy*N+sx,gx=goal.x+goal.w/2,gy=goal.y+goal.h/2,h=new H(),gs=new Map([[s,0]]),pr=new Map();h.push(s,0);
+while(h.n){const c=h.pop(),cx=c%N,cy=c/N|0;
+if(grid[c]===goal){const p=[];let k=c;while(k!==s){p.push({x:k%N,y:k/N|0});k=pr.get(k)}return p.reverse()}
+for(const[dx,dy]of D){const x=cx+dx,y=cy+dy;if(x<0||y<0||x>=N||y>=N)continue;if(dx&&dy&&(grid[cy*N+x]||grid[y*N+cx]))continue;
+const k=y*N+x,b=grid[k],w=(b===goal?1:b?(b.t=='wall'?8:30):1)*(dx&&dy?1.41:1),ng=gs.get(c)+w;
+if(ng<(gs.get(k)??1e9)){gs.set(k,ng);pr.set(k,c);h.push(k,ng+Math.hypot(gx-x-.5,gy-y-.5))}}}return[]}
+function rnd(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function genFoe(L){const r=rnd(L*7919),s=1+.15*(L-1),l=[mk('hall',9,9,s)],R=(a,b)=>a+Math.floor(r()*(b-a));
+const add=(t,x0,x1,y0,y1,m=1)=>{for(let i=0;i<40;i++){const x=R(x0,x1),y=R(y0,y1);if(free(l,x,y,B[t].w,B[t].h,m)){l.push(mk(t,x,y,s));return}}};
+for(let i=0;i<Math.min(2+L,7);i++)add('tower',6,15,6,15);
+for(let i=0;i<3;i++){add('mine',6,15,6,15);add('farm',6,15,6,15)}add('barracks',6,14,6,14);add('fire',6,15,6,15);add('fire',6,15,6,15);
+for(let i=0;i<3;i++){add('mine',1,20,1,20);add('farm',1,20,1,20)}
+const outside=(x,y)=>x<5||x>16||y<5||y>16;l.filter(b=>outside(b.x,b.y)&&b.t!='hall').forEach(b=>{if(!(b.x>=2&&b.y>=2&&b.x<=19&&b.y<=19)){b.dead=true}});
+const gap=L<3?[R(6,15),5]:null;
+for(let i=5;i<=16;i++)for(const[x,y]of[[i,5],[i,16],[5,i],[16,i]])if(!(gap&&x==gap[0]&&y==gap[1])&&free(l,x,y,1,1))l.push(mk('wall',x,y,s));
+return l.filter(b=>!b.dead).concat([])}
+const cap=()=>S.bs.filter(b=>b.t=='barracks').length*20+S.bs.filter(b=>b.t=='fire').length*3;
+const used=()=>Object.entries(S.army).reduce((a,[k,v])=>a+v*U[k].sz,0);
+function kill(b){b.dead=true;mkgrid(foes);if(b.t=='hall')hallDown=true}
+const alive=()=>foes.filter(b=>!b.dead&&b.t!='wall');
+function pick0(u){const l=alive();if(!l.length)return null;let c=l;if(u.k=='ram'){const t=l.filter(b=>b.t=='tower');if(t.length)c=t}
+let best=null,bd=1e9;for(const b of c){const d=Math.hypot(b.x+b.w/2-u.x,b.y+b.h/2-u.y);if(d<bd){bd=d;best=b}}return best}
+function hit(u,b){if(u.cd>0)return;const d=U[u.k];u.cd=u.k=='ram'?1.2:.9;b.hp-=d.d*(u.k=='ram'&&b.t=='wall'?2:1);fx.push({a:u.x,b:u.y,c:b.x+b.w/2,d:b.y+b.h/2,l:.1,col:d.col});if(b.hp<=0)kill(b)}
+function stepTroop0(u,dt){const d=U[u.k];u.cd-=dt;if(!u.t||u.t.dead){u.t=pick(u);u.p=null}if(!u.t)return;const t=u.t;
+const dx=Math.max(t.x-u.x,0,u.x-t.x-t.w),dy=Math.max(t.y-u.y,0,u.y-t.y-t.h);
+if(Math.hypot(dx,dy)<=d.r){hit(u,t);return}
+if(!u.p||!u.p.length)u.p=astar(Math.min(N-1,Math.max(0,u.x|0)),Math.min(N-1,Math.max(0,u.y|0)),t);
+const n=u.p[0];if(!n)return;const b=grid[n.y*N+n.x];if(b&&b!==t){hit(u,b);return}
+const tx=n.x+.5,ty=n.y+.5,dd=Math.hypot(tx-u.x,ty-u.y),st=d.sp*dt;if(dd<=st){u.x=tx;u.y=ty;u.p.shift()}else{u.x+=(tx-u.x)/dd*st;u.y+=(ty-u.y)/dd*st}}
+function stepFoes(dt){for(const b of foes){if(b.dead||b.t!='tower')continue;b.cd=(b.cd||0)-dt;if(b.cd>0)continue;let best=null;for(const u of troops)if(Math.hypot(u.x-b.x-1,u.y-b.y-1)<7&&(!best||u.hp<best.hp))best=u;
+if(best){best.hp-=12*(1+.12*(lvlFoe-1));b.cd=.8;fx.push({a:b.x+1,b:b.y+1,c:best.x,d:best.y,l:.1,col:'#c0392b'});if(best.hp<=0)troops.splice(troops.indexOf(best),1)}}}
+function pct(){const n=foes.filter(b=>b.t!='wall');return n.length?Math.round(100*n.filter(b=>b.dead).length/n.length):0}
+const stars=()=>{const p=pct();return(p>=50)+hallDown+(p>=100)};
+function startRaid(){const c=CH(S.level);story(c.lord+': '+c.t,c.intro,go2)}function go2(){lvlFoe=S.level;foes=genFoe(lvlFoe);mkgrid(foes);troops=[];fx=[];timer=120;hallDown=false;ended=false;mode='battle';dep=Object.keys(S.army).find(k=>S.army[k]>0)||'knight';say('Tap near the village edge to deploy troops. Rams hunt towers; knights and archers take the nearest building.');ui()}
+function endRaid(){if(ended)return;ended=true;const p=pct(),s=stars(),leftover=S.army;let m=`Raid over: ${p}% destroyed, ${s} star${s==1?'':'s'}. `;
+if(s>=1){const lg=Math.round((300+lvlFoe*150)*p/100),lf=Math.round((150+lvlFoe*60)*p/100);S.gold+=lg;S.food+=lf;S.level++;m+=`Looted ${lg} gold and ${lf} food. Village ${S.level} awaits.`}else m+='Not enough damage to win loot. Train more troops.';
+say(m);mode='home';mkgrid(S.bs);save();ui();if(s>=1)winStory(lvlFoe,m)}
+function ui(){const bar=document.getElementById('bar'),h=[];
+if(mode=='home'){for(const k in B)if(k!='hall')h.push(`<button data-b="${k}" class="${sel==k?'on':''}" ${S.gold<B[k].c?'disabled':''}>${B[k].n} ${B[k].c}g</button>`);
+h.push(`<button data-b="remove" class="${sel=='remove'?'on':''}">Demolish</button>`);
+for(const k in U)h.push(`<button data-t="${k}" ${S.food<U[k].c||used()+U[k].sz>cap()?'disabled':''}>Train ${U[k].n} ${U[k].c}f</button>`);
+h.push(`<button class="go" data-go="1" ${used()?'':'disabled'}>Raid village ${S.level}</button>`)}
+else{for(const k in U)h.push(`<button data-d="${k}" class="${dep==k?'on':''}" ${S.army[k]?'':'disabled'}>${U[k].n} x${S.army[k]}</button>`);h.push('<button class="go" data-ret="1">Retreat</button>')}
+bar.innerHTML=h.join('');st()}
+function st(){const t=mode=='battle'?` | ${pct()}% | ${'★'.repeat(stars())||'☆'} | ${Math.ceil(timer)}s`:'';document.getElementById('st').textContent=`Gold ${Math.floor(S.gold)}  Food ${Math.floor(S.food)}  Army ${used()}/${cap()}  Level ${S.level}${t}`}
+document.getElementById('bar').onclick=e=>{const q=e.target.closest('button');if(!q)return;const d=q.dataset;
+if(d.b){sel=d.b}else if(d.t){S.food-=U[d.t].c;S.army[d.t]++;save()}else if(d.go)startRaid();else if(d.d)dep=d.d;else if(d.ret){troops=[];S.army={knight:0,archer:0,ram:0};endRaid();return}ui()};
+function pos(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*N,y:(e.clientY-r.top)/r.height*N}}
+cv.onmousemove=e=>hover=pos(e);cv.onmouseleave=()=>hover=null;
+cv.onclick=e=>{const p=pos(e);hover=p;const x=Math.floor(p.x),y=Math.floor(p.y);
+if(mode=='home'){if(sel=='remove'){const b=grid[y*N+x];if(b&&b.t!='hall'){S.gold+=B[b.t].c/2;S.bs.splice(S.bs.indexOf(b),1);mkgrid(S.bs);save();ui()}return}
+const d=B[sel];if(!d||S.gold<d.c)return;const bx=Math.min(x,N-d.w),by=Math.min(y,N-d.h);
+if(!free(S.bs,bx,by,d.w,d.h)){say('That spot is taken.');return}S.gold-=d.c;S.bs.push(mk(sel,bx,by));mkgrid(S.bs);save();ui()}
+else{if(!S.army[dep]){say('Pick a troop type with units left.');return}
+if(foes.some(b=>!b.dead&&Math.hypot(Math.max(b.x-p.x,0,p.x-b.x-b.w),Math.max(b.y-p.y,0,p.y-b.y-b.h))<2.2)){say('Too close to enemy buildings. Deploy farther out.');return}
+S.army[dep]--;troops.push({k:dep,x:p.x,y:p.y,hp:U[dep].hp,cd:0,t:null,p:null});ui()}};
+let last=performance.now(),acc=0;
+function loop(now){const dt=Math.min(.05,(now-last)/1e3);last=now;
+if(mode=='home'){const m=S.bs.filter(b=>b.t=='mine').length,f=S.bs.filter(b=>b.t=='farm').length;S.gold=Math.min(3000,S.gold+m*3*dt);S.food=Math.min(2000,S.food+f*2*dt);acc+=dt;if(acc>1){acc=0;ui();save()}}
+else if(!ended){timer-=dt;troops.forEach(u=>stepTroop(u,dt));stepFoes(dt);fx.forEach(f=>f.l-=dt);fx=fx.filter(f=>f.l>0);st();
+const none=!troops.length&&!Object.values(S.army).some(v=>v);if(none||timer<=0||!alive().length)endRaid()}
+draw();requestAnimationFrame(loop)}
+function drawB0(b){const d=B[b.t],x=b.x*T,y=b.y*T,w=b.w*T,h=b.h*T;g.fillStyle=d.col;g.fillRect(x+1,y+1,w-2,h-2);g.strokeStyle='#2a2118';g.lineWidth=2;g.strokeRect(x+1,y+1,w-2,h-2);
+if(b.t=='wall'){g.fillStyle='#9a9480';g.fillRect(x+4,y+4,T-8,T-8)}
+if(d.i){g.font=Math.min(w,h)*.6+'px serif';g.textAlign='center';g.textBaseline='middle';g.fillStyle='#000';g.fillText(d.i,x+w/2,y+h/2+1)}
+if(b.hp<b.m){g.fillStyle='#400';g.fillRect(x,y-5,w,4);g.fillStyle='#4c4';g.fillRect(x,y-5,w*Math.max(0,b.hp/b.m),4)}}
+function draw0(){for(let y=0;y<N;y++)for(let x=0;x<N;x++){g.fillStyle=(x+y)%2?'#5e8a3f':'#68964a';g.fillRect(x*T,y*T,T,T)}
+const l=mode=='home'?S.bs:foes;l.filter(b=>!b.dead).sort((a,b)=>(a.t=='wall')-(b.t=='wall')).forEach(drawB);
+if(mode=='home'&&hover&&B[sel]){const d=B[sel],x=Math.min(Math.floor(hover.x),N-d.w),y=Math.min(Math.floor(hover.y),N-d.h),ok=free(S.bs,x,y,d.w,d.h)&&S.gold>=d.c;g.fillStyle=ok?'rgba(255,255,255,.4)':'rgba(200,30,30,.5)';g.fillRect(x*T,y*T,d.w*T,d.h*T)}
+for(const u of troops){const d=U[u.k],x=u.x*T,y=u.y*T;g.fillStyle=d.col;g.strokeStyle='#111';g.lineWidth=2;g.beginPath();if(u.k=='ram')g.rect(x-11,y-7,22,14);else g.arc(x,y,u.k=='knight'?8:6,0,7);g.fill();g.stroke();g.fillStyle='#4c4';g.fillRect(x-9,y-14,18*Math.max(0,u.hp/d.hp),3)}
+for(const f of fx){g.strokeStyle=f.col;g.lineWidth=2;g.beginPath();g.moveTo(f.a*T,f.b*T);g.lineTo(f.c*T,f.d*T);g.stroke()}}
+/* Improved AI: weighted target scoring with load spreading, line-of-sight path smoothing, separation steering */
+function pick(u){const l=alive();let best=null,bs=1e9;for(const b of l){let s=Math.hypot(b.x+b.w/2-u.x,b.y+b.h/2-u.y);
+s+=u.k=='ram'?(b.t=='tower'?-12:0):u.k=='archer'?(b.t=='tower'?4:b.t=='mine'||b.t=='farm'?-3:0):(b.t=='barracks'?-4:b.t=='tower'?2:0);
+if(b.hp<b.m*.5)s-=2;s+=troops.reduce((a,o)=>a+(o!==u&&o.t===b),0)*1.5;if(s<bs){bs=s;best=b}}return best}
+function los(a,b,c,d){const n=Math.ceil(Math.hypot(c-a,d-b)*4);for(let i=1;i<n;i++){const x=a+(c-a)*i/n,y=b+(d-b)*i/n;if(grid[(y|0)*N+(x|0)]&&((x|0)!=(c|0)||(y|0)!=(d|0)))return false}return true}
+function smooth(p,x,y){const o=[];let i=0;while(i<p.length){let j=i;for(let k=i+1;k<p.length&&!grid[p[k-1].y*N+p[k-1].x]&&los(x,y,p[k].x+.5,p[k].y+.5);k++)j=k;o.push(p[j]);x=p[j].x+.5;y=p[j].y+.5;i=j+1}return o}
+function stepTroop(u,dt){const d=U[u.k];u.cd-=dt;if(!u.t||u.t.dead){u.t=pick(u);u.p=null}if(!u.t)return;const t=u.t;
+const dx=Math.max(t.x-u.x,0,u.x-t.x-t.w),dy=Math.max(t.y-u.y,0,u.y-t.y-t.h);
+if(Math.hypot(dx,dy)<=d.r){hit(u,t);return}
+if(!u.p||!u.p.length)u.p=smooth(astar(Math.min(N-1,Math.max(0,u.x|0)),Math.min(N-1,Math.max(0,u.y|0)),t),u.x,u.y);
+const n=u.p[0];if(!n)return;const b=grid[n.y*N+n.x];if(b&&b!==t){hit(u,b);return}
+const tx=n.x+.5,ty=n.y+.5,dd=Math.hypot(tx-u.x,ty-u.y),st=d.sp*dt;if(dd<=st){u.x=tx;u.y=ty;u.p.shift()}else{u.x+=(tx-u.x)/dd*st;u.y+=(ty-u.y)/dd*st}
+for(const o of troops)if(o!==u){const ex=u.x-o.x,ey=u.y-o.y,e=Math.hypot(ex,ey);if(e>.01&&e<.55){const nx=u.x+ex/e*dt,ny=u.y+ey/e*dt;if(!grid[(ny|0)*N+(nx|0)]){u.x=nx;u.y=ny}}}}
+/* Graphics */
+const TC=document.createElement('canvas');TC.width=TC.height=N*T;(function(){const c=TC.getContext('2d'),r=rnd(42);for(let y=0;y<N;y++)for(let x=0;x<N;x++){c.fillStyle=`hsl(${95+r()*12},38%,${44+r()*8}%)`;c.fillRect(x*T,y*T,T,T);for(let i=0;i<6;i++){c.fillStyle=`hsla(${90+r()*20},40%,${30+r()*30}%,.5)`;c.fillRect(x*T+r()*T,y*T+r()*T,2,4)}
+if(r()<.05){c.fillStyle=['#f4e04d','#fff','#e66'][r()*3|0];c.beginPath();c.arc(x*T+r()*T,y*T+r()*T,2,0,7);c.fill()}
+if((x<1||y<1||x>N-2||y>N-2)&&r()<.35){const a=x*T+T/2,b=y*T+T/2;c.fillStyle='#3d2b1a';c.fillRect(a-2,b,4,9);c.fillStyle='#2f6b2c';c.beginPath();c.arc(a,b-2,10,0,7);c.fill();c.fillStyle='#3f8a3a';c.beginPath();c.arc(a-3,b-5,6,0,7);c.fill()}}})();
+function drawB1(b){const x=b.x*T,y=b.y*T,w=b.w*T,h=b.h*T,t=b.t,tm=performance.now()/1e3;g.fillStyle='rgba(0,0,0,.25)';g.fillRect(x+4,y+h-3,w,6);
+if(t=='wall'){g.fillStyle='#8b8577';g.fillRect(x+1,y+1,T-2,T-2);g.fillStyle='#b3ad9a';g.fillRect(x+1,y+1,T-2,5);g.strokeStyle='#5b5648';g.lineWidth=1;g.strokeRect(x+1.5,y+1.5,T-3,T-3);g.beginPath();g.moveTo(x+1,y+T/2);g.lineTo(x+T-1,y+T/2);g.moveTo(x+T/2,y+T/2);g.lineTo(x+T/2,y+T-1);g.stroke()}
+else if(t=='tower'){g.fillStyle='#6b7280';g.beginPath();g.arc(x+w/2,y+h/2+4,w/2-3,0,7);g.fill();g.fillStyle='#8a92a0';g.fillRect(x+6,y+6,w-12,h-18);for(let i=0;i<3;i++){g.fillStyle='#a3abb8';g.fillRect(x+7+i*14,y+2,9,7)}g.fillStyle='#222';g.fillRect(x+w/2-3,y+h/2-6,6,10)}
+else if(t=='hall'){g.fillStyle='#8d8d97';g.fillRect(x+3,y+14,w-6,h-16);g.fillStyle='#a9a9b5';g.fillRect(x+3,y+14,w-6,6);[x+3,x+w-21].forEach(a=>{g.fillStyle='#777783';g.fillRect(a,y+4,18,h-8);for(let i=0;i<3;i++){g.fillStyle='#b9b9c6';g.fillRect(a+1+i*6,y+1,5,6)}});g.fillStyle='#3a2616';g.fillRect(x+w/2-8,y+h-24,16,22);g.fillStyle='#7a1f1f';const f=Math.sin(tm*4)*3;g.beginPath();g.moveTo(x+w/2,y-4);g.lineTo(x+w/2,y+14);g.lineTo(x+w/2+14+f,y+6);g.fill()}
+else if(t=='mine'){g.fillStyle='#6a5a48';g.beginPath();g.ellipse(x+w/2,y+h/2+4,w/2-3,h/2-6,0,0,7);g.fill();g.fillStyle='#2b2118';g.beginPath();g.arc(x+w/2,y+h/2+6,9,Math.PI,0);g.fill();g.fillStyle='#f2c230';[[8,16],[40,12],[44,38],[12,40]].forEach(([a,c])=>{g.beginPath();g.arc(x+a,y+c,4,0,7);g.fill()})}
+else if(t=='farm'){g.fillStyle='#6b4a2b';g.fillRect(x+2,y+2,w-4,h-4);for(let i=0;i<5;i++){g.fillStyle=i%2?'#d9b84a':'#8fbf3f';g.fillRect(x+5,y+6+i*9,w-10,5)}g.fillStyle='#c9a032';g.beginPath();g.arc(x+w-8,y+h-8,6,0,7);g.fill()}
+else{g.fillStyle='#c9b79a';g.fillRect(x+3,y+16,w-6,h-18);g.fillStyle='#8a2f22';g.beginPath();g.moveTo(x,y+18);g.lineTo(x+w/2,y-2);g.lineTo(x+w,y+18);g.fill();g.fillStyle='#3a2616';g.fillRect(x+w/2-7,y+h-20,14,18);g.fillStyle='#e6e6f2';g.fillRect(x+10,y+26,4,14);g.fillRect(x+w-14,y+26,4,14)}
+if(b.hp<b.m){g.fillStyle='#400';g.fillRect(x,y-8,w,4);g.fillStyle='#4c4';g.fillRect(x,y-8,w*Math.max(0,b.hp/b.m),4)}}
+function draw1(){g.drawImage(TC,0,0);if(mode=='battle')foes.filter(b=>b.dead&&b.t!='wall').forEach(b=>{g.fillStyle='#3a332b';g.fillRect(b.x*T+4,(b.y+b.h)*T-12,b.w*T-8,9);g.fillStyle='rgba(60,60,60,.35)';g.beginPath();g.arc((b.x+b.w/2)*T,(b.y+b.h/2)*T-6-(performance.now()/60%14),8,0,7);g.fill()});
+const l=mode=='home'?S.bs:foes;l.filter(b=>!b.dead).sort((a,b)=>(a.y+a.h)-(b.y+b.h)).forEach(drawB);
+if(mode=='home'&&hover&&B[sel]){const d=B[sel],x=Math.min(Math.floor(hover.x),N-d.w),y=Math.min(Math.floor(hover.y),N-d.h),ok=free(S.bs,x,y,d.w,d.h)&&S.gold>=d.c;g.fillStyle=ok?'rgba(255,255,255,.4)':'rgba(200,30,30,.5)';g.fillRect(x*T,y*T,d.w*T,d.h*T)}
+const tm=performance.now();for(const u of troops){const d=U[u.k],x=u.x*T,y=u.y*T+Math.sin(tm/90+u.x*9)*1.5;g.fillStyle='rgba(0,0,0,.3)';g.beginPath();g.ellipse(x,y+7,8,3,0,0,7);g.fill();
+if(u.k=='ram'){g.fillStyle='#6b4423';g.fillRect(x-14,y-4,28,9);g.fillStyle='#999';g.fillRect(x+10,y-5,6,11);g.fillStyle='#222';g.beginPath();g.arc(x-8,y+6,4,0,7);g.arc(x+6,y+6,4,0,7);g.fill()}
+else{g.fillStyle=u.k=='knight'?'#4a6fa5':'#3f7a3a';g.fillRect(x-5,y-4,10,11);g.fillStyle='#e8c9a0';g.beginPath();g.arc(x,y-8,5,0,7);g.fill();g.fillStyle=u.k=='knight'?'#aaa':'#5a3a1a';g.fillRect(x-5,y-13,10,5);if(u.k=='knight'){g.fillStyle='#d4af37';g.fillRect(x+5,y-3,5,8)}else{g.strokeStyle='#5a3a1a';g.lineWidth=2;g.beginPath();g.arc(x+6,y,6,-1.2,1.2);g.stroke()}}
+g.fillStyle='#400';g.fillRect(x-9,y-18,18,3);g.fillStyle='#4c4';g.fillRect(x-9,y-18,18*Math.max(0,u.hp/d.hp),3)}
+for(const f of fx){g.strokeStyle=f.col;g.lineWidth=2;g.beginPath();g.moveTo(f.a*T,f.b*T);g.lineTo(f.c*T,f.d*T);g.stroke();const q=1-f.l/.1;g.fillStyle='#fff';g.beginPath();g.arc((f.a+(f.c-f.a)*q)*T,(f.b+(f.d-f.b)*q)*T,3,0,7);g.fill()}
+const v=g.createRadialGradient(N*T/2,N*T/2,N*T*.35,N*T/2,N*T/2,N*T*.75);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(20,10,0,.35)');g.fillStyle=v;g.fillRect(0,0,N*T,N*T)}
+/* V3: story, choices, firelight */
+const PRO2='The black fire came from the north. Where the Ashen Horde marches, graves open and the dead feed their pyres. Ironhold keeps the last Ember, the old bonfire that holds the dead at rest. Maren, the bone-priestess, tends it. "Keep it lit, my lord, and feed it with victories."';
+const STORY2=[{lord:'Brask the Pale',t:'The Charnel Mill',intro:'Maren\'s scouts found a mill where Brask piles bones for his pyre. Break his camp.',win:'Brask\'s pyre drowns in the rain. In the ash Maren finds one name carved: the Ashen King.'},{lord:'Lady Venna of Thorns',t:'The Thorn Ridge',intro:'Venna was a healer before the black fire took her. Her archers watch from the ridge. Bring rams for the towers.',win:'Venna weeps as she falls: "He promised me my son back." The King trades in stolen dead.'},{lord:'Sir Aldric the Turncoat',t:'The Sealed Hamlet',intro:'Your old captain has walled the hamlet shut. Rams will have to breach it.',win:'Aldric confesses he opened the gates of Eastwatch to save his daughter.'},{lord:'Warlord Mordane',t:'Gallows Keep',intro:'Mordane hangs the fallen from his walls to feed the pyres. Few return from here.',win:'Gallows Keep burns. A map of the Hollow Throne lies on Mordane\'s table.'},{lord:'Sister Ysolde',t:'The Bone Choir',intro:'Ysolde sings the dead to their feet. Silence her choir before it reaches your gates.',win:'The song breaks. Maren whispers that the Ember is the only fire the King fears.'},{lord:'The Ashen King',t:'The Hollow Throne',intro:'The Ashen King waits on a throne of bone. End the war.',win:'',endA:'You lay the dead to rest and kneel at the Ember. It rises white and warm, and the Marches sleep in peace.',endB:'You take the crown of ash. The Ember burns black and obedient, and the Marches learn to fear their new lord.'}];
+function story(h,p,cb,o){const sb=document.getElementById('sb'),so=document.getElementById('so');document.getElementById('sh').textContent=h;document.getElementById('sp').textContent=p;scb=cb;sb.hidden=!!o;so.innerHTML='';(o||[]).forEach(([t,f])=>{const b=document.createElement('button');b.textContent=t;b.style.marginRight='8px';b.onclick=()=>{document.getElementById('story').hidden=true;f()};so.appendChild(b)});document.getElementById('story').hidden=false}
+function winStory(L,m){const c=CH(L);if(L>=STORY2.length){const k=(S.mercy||0)>=(S.ruth||0);story(k?'The Ember Rekindled':'The Ash Crown',(k?c.endA:c.endB)+' '+m,0);return}
+story('Victory: '+c.lord,c.win+' '+m,0,[['Spare the captives',()=>{S.mercy=(S.mercy||0)+1;S.army.knight+=2;save();ui();say('Freed prisoners swear to your banner: +2 knights.')}],['Take the spoils',()=>{S.ruth=(S.ruth||0)+1;S.gold+=250;save();ui();say('You loot the camp: +250 gold.')}]])}
+function drawB(b){if(b.t!='fire'){drawB1(b);return}const x=b.x*T+T/2,y=b.y*T+T/2+4,tm=performance.now()/1e3;g.fillStyle='rgba(0,0,0,.3)';g.beginPath();g.ellipse(x,y+6,13,5,0,0,7);g.fill();g.fillStyle='#777';for(let i=0;i<7;i++){g.beginPath();g.arc(x+Math.cos(i*.9)*11,y+5+Math.sin(i*.9)*4,3.2,0,7);g.fill()}
+g.strokeStyle='#4a2e18';g.lineWidth=4;g.beginPath();g.moveTo(x-9,y+3);g.lineTo(x+9,y-3);g.moveTo(x-9,y-3);g.lineTo(x+9,y+3);g.stroke();
+[['#e0561b',11],['#f59a23',8],['#ffe27a',4.5]].forEach(([c,s],i)=>{const f=Math.sin(tm*9+i)*2;g.fillStyle=c;g.beginPath();g.moveTo(x-s*.7,y);g.quadraticCurveTo(x-s*.5+f,y-s*1.4,x+f,y-s*2.4);g.quadraticCurveTo(x+s*.5+f,y-s*1.4,x+s*.7,y);g.fill()});
+g.fillStyle='#e8e2cf';g.beginPath();g.arc(x+13,y+6,3,0,7);g.fill();g.fillRect(x+11.5,y+8,3,2);if(b.hp<b.m){g.fillStyle='#400';g.fillRect(x-12,y-30,24,4);g.fillStyle='#4c4';g.fillRect(x-12,y-30,24*Math.max(0,b.hp/b.m),4)}}
+const P=[],DK=document.createElement('canvas');DK.width=DK.height=N*T;const dg=DK.getContext('2d');let lt=performance.now();
+function lights(){const l=[],L=mode=='home'?S.bs:foes;for(const b of L){if(b.dead){if(b.t!='wall'&&mode=='battle')l.push([b.x+b.w/2,b.y+b.h/2,3,.9,1]);continue}if(b.t=='fire')l.push([b.x+.5,b.y+.5,5.5,1,1]);else if(b.t=='tower'||b.t=='hall')l.push([b.x+b.w/2,b.y+b.h/2,3,.55,0])}return l}
+function draw(){const now=performance.now(),dt=Math.min(.05,(now-lt)/1e3);lt=now;draw1();const L=lights(),W=N*T,fl=1+Math.sin(now/90)*.04+Math.sin(now/37)*.03;
+dg.globalCompositeOperation='source-over';dg.clearRect(0,0,W,W);dg.fillStyle=`rgba(8,10,30,${mode=='battle'?.62:.5})`;dg.fillRect(0,0,W,W);dg.globalCompositeOperation='destination-out';
+for(const q of L){const r=q[2]*T*fl,x=q[0]*T,y=q[1]*T,gr=dg.createRadialGradient(x,y,2,x,y,r);gr.addColorStop(0,`rgba(0,0,0,${q[3]})`);gr.addColorStop(1,'rgba(0,0,0,0)');dg.fillStyle=gr;dg.fillRect(x-r,y-r,2*r,2*r)}g.drawImage(DK,0,0);
+g.globalCompositeOperation='lighter';for(const q of L){const r=q[2]*T*fl,x=q[0]*T,y=q[1]*T,gr=g.createRadialGradient(x,y,2,x,y,r);gr.addColorStop(0,`rgba(255,150,50,${.28*q[3]})`);gr.addColorStop(1,'rgba(255,100,20,0)');g.fillStyle=gr;g.fillRect(x-r,y-r,2*r,2*r);
+if(q[4]&&P.length<500)for(let i=0;i<2;i++)if(Math.random()<.5)P.push({x:x+(Math.random()-.5)*10,y:y+2,vx:(Math.random()-.5)*14,vy:-30-Math.random()*40,l:.6+Math.random()*.6,e:Math.random()<.35})}
+for(let i=P.length-1;i>=0;i--){const p=P[i];p.l-=dt;if(p.l<=0){P.splice(i,1);continue}p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx+=(Math.random()-.5)*30*dt;g.fillStyle=p.e?`rgba(255,${120+p.l*100|0},40,${Math.min(1,p.l*2)})`:`rgba(255,${160+p.l*90|0},60,${Math.min(.8,p.l)})`;g.beginPath();g.arc(p.x,p.y,p.e?1.6:3.5*p.l+1,0,7);g.fill()}
+g.globalCompositeOperation='source-over';g.fillStyle='rgba(200,210,230,.06)';for(let i=0;i<5;i++){g.beginPath();g.ellipse(((now/40+i*170)%(W+200))-100,(i*130+40)%W,110,22,0,0,7);g.fill()}}
+mkgrid(S.bs);ui();if(!S.seen3){S.seen3=1;story('Ember of the Marches',PRO2,0)}requestAnimationFrame(loop);
+</script></body></html>
